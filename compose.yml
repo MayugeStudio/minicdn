@@ -1,0 +1,31 @@
+services:
+  origin:
+    image: minicdn-origin
+    ports:
+      - "9000:9000"
+    networks:
+      - cdn
+
+  node1:
+    hostname: node1
+    image: minicdn-node
+    environment:
+      NODE_NUMBER: 1
+    ports:
+      - "5001:5000"
+    networks:
+      - cdn
+
+  node2:
+    hostname: node2
+    image: minicdn-node
+    environment:
+      NODE_NUMBER: 2
+    ports:
+      - "5002:5000"
+    networks:
+      - cdn
+
+networks:
+  cdn:
+

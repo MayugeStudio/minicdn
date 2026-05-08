@@ -1,6 +1,6 @@
 services:
   origin:
-    image: minicdn-origin
+    build: ./origin
     ports:
       - "9000:9000"
     networks:
@@ -8,7 +8,7 @@ services:
 
   node1:
     hostname: node1
-    image: minicdn-node
+    build: ./node
     environment:
       NODE_NUMBER: 1
     ports:
@@ -18,7 +18,7 @@ services:
 
   node2:
     hostname: node2
-    image: minicdn-node
+    build: ./node
     environment:
       NODE_NUMBER: 2
     ports:

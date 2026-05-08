@@ -1,7 +1,7 @@
-module kawababa.com/minicdn
+module github.com/MayugeStudio/minicdn
 
 go 1.26.1
 
-replace kawababa.com/minicdn/node => ./node
+replace github.com/MayugeStudio/minicdn/node => ./node
 
-replace kawababa.com/minicdn/origin => ./origin
+replace github.com/MayugeStudio/minicdn/origin => ./origin

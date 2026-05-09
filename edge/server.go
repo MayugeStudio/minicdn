@@ -16,6 +16,14 @@ type Edge struct {
 	 cache  lrucache.LRUCache	
 }
 
+// logger
+func logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println(r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func NewEdge(target *url.URL) *Edge {
 	// Define rewrite function
 	rewrite := func(pr *httputil.ProxyRequest) {
@@ -42,7 +50,7 @@ func NewEdge(target *url.URL) *Edge {
 func (n *Edge) Start(addr string) {
 	server := http.Server{
 		Addr: addr,
-		Handler: n.rp,
+		Handler: logger(n.rp),
 	}
 
 	hostname, err := os.Hostname()

@@ -9,9 +9,11 @@ services:
 
   edge1:
     hostname: edge1
-    build: ./edge
+    build: 
+      context: ./edge
     environment:
       EDGE_NUMBER: 1
+
     ports:
       - "5001:5000"
     networks:
@@ -20,7 +22,8 @@ services:
 
   edge2:
     hostname: edge2
-    build: ./edge
+    build:
+      context: ./edge
     environment:
       EDGE_NUMBER: 2
     ports:

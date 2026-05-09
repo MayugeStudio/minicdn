@@ -11,12 +11,12 @@ import (
 	"github.com/MayugeStudio/lrucache"
 )
 
-type Node struct {
+type Edge struct {
 	 rp			*httputil.ReverseProxy
 	 cache  lrucache.LRUCache	
 }
 
-func NewNode(target *url.URL) *Node {
+func NewEdge(target *url.URL) *Edge {
 	// Define rewrite function
 	rewrite := func(pr *httputil.ProxyRequest) {
 		// SetURL do the following things
@@ -32,14 +32,14 @@ func NewNode(target *url.URL) *Node {
 		log.Printf("%s => %s\n", pr.In.RemoteAddr, target)
 	}
 
-	return &Node{
+	return &Edge{
 		rp: &httputil.ReverseProxy{
 			Rewrite: rewrite,
 		},
 	}
 }
 
-func (n *Node) Start(addr string) {
+func (n *Edge) Start(addr string) {
 	server := http.Server{
 		Addr: addr,
 		Handler: n.rp,
@@ -57,19 +57,19 @@ func (n *Node) Start(addr string) {
 const ORIGIN_SERVER_HOSTNAME = "origin"
 
 func main() {
-	nodeNumber, ok := os.LookupEnv("NODE_NUMBER")
+	edgeNumber, ok := os.LookupEnv("EDGE_NUMBER")
 	if !ok {
-		panic("Failed to get NODE_NUMBER")
+		panic("Failed to get EDGE_NUMBER")
 	}
 
-	log.SetPrefix(fmt.Sprintf("[NODE%s] ", nodeNumber))
+	log.SetPrefix(fmt.Sprintf("[EDGE%s] ", edgeNumber))
 
 	target, err := url.Parse("http://" + ORIGIN_SERVER_HOSTNAME + ":9000")
 	if err != nil {
 		panic("Failed to parse Origin server")
 	}
 
-	node := NewNode(target)
-	node.Start("0.0.0.0:5000")
+	edge := NewEdge(target)
+	edge.Start("0.0.0.0:5000")
 }
 

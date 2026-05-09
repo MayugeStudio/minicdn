@@ -1,4 +1,4 @@
-module github.com/MayugeStudio/minicdn/node
+module github.com/MayugeStudio/minicdn/edge
 
 go 1.26.1
 

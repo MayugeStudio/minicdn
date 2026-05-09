@@ -4,7 +4,8 @@ services:
     ports:
       - "9000:9000"
     networks:
-      - cdn
+      cdn:
+        ipv4_address: 192.168.0.10
 
   node1:
     hostname: node1
@@ -14,7 +15,8 @@ services:
     ports:
       - "5001:5000"
     networks:
-      - cdn
+      cdn:
+        ipv4_address: 192.168.0.51
 
   node2:
     hostname: node2
@@ -24,8 +26,13 @@ services:
     ports:
       - "5002:5000"
     networks:
-      - cdn
+      cdn:
+        ipv4_address: 192.168.0.52
 
 networks:
   cdn:
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.168.0.0/24
 

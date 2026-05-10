@@ -73,7 +73,7 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// キャッシュキーを生成する
 		cacheKey := GenerateCacheKey(r.Host, r.URL.Path, r.URL.Query())
-		e.cache.Dump()
+
 		// キャッシュキーが存在するかチェックする
 		if content, ok := e.cache.Get(cacheKey); ok {
 			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)

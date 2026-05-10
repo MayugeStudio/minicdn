@@ -111,8 +111,8 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 		// Response from the backend. It is called if the backend
 		// returns a response at all, with any HTTP status code.
 		// とあるので、エラーの可能性があるため、まずはそれを確認する。
-		if resp.StatusCode < 100 && resp.StatusCode > 199 {
-			return fmt.Errorf("bad status code error %q", resp.StatusCode)
+		if resp.StatusCode < 100 || resp.StatusCode > 199 {
+			return fmt.Errorf("bad status code error %d", resp.StatusCode)
 		}
 
 		req := resp.Request

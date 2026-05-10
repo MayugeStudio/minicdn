@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"bytes"
+	"io"
 	"fmt"
 	"os"
 	"slices"
@@ -16,9 +18,15 @@ import (
 	"github.com/MayugeStudio/lrucache"
 )
 
+const ORIGIN_SERVER_HOSTNAME = "origin"
+const ORIGIN_PORT = "9000"
+
+const EDGE_ADDRESS = "0.0.0.0"
+const EDGE_PORT = ":5000"
+
 type Edge struct {
 	 rp			*httputil.ReverseProxy
-	 cache  lrucache.LRUCache	
+	 cache  *lrucache.LRUCache	
 }
 
 // GenerateCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
@@ -46,6 +54,7 @@ func GenerateCacheKey(host string, path string, queries url.Values) string {
 	byteArray = append(byteArray, []byte(path)...)
 	byteArray = append(byteArray, []byte(host)...)
 
+
 	hashValue := sha256.Sum256(byteArray)
 	return hex.EncodeToString(hashValue[:])
 }
@@ -63,11 +72,12 @@ func logger(next http.Handler) http.Handler {
 func checkCache(next http.Handler, e *Edge) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// キャッシュキーを生成する
-		cacheKey := GenerateCacheKey(r.URL.Host, r.URL.Path, r.URL.Query())
+		cacheKey := GenerateCacheKey(r.Host, r.URL.Path, r.URL.Query())
+		e.cache.Dump()
 		// キャッシュキーが存在するかチェックする
 		if content, ok := e.cache.Get(cacheKey); ok {
 			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)
-			fmt.Fprint(w, content)
+			io.WriteString(w, content)
 			return
 		}
 		log.Printf("Cache MISS: %s is not in the cache\n", cacheKey)
@@ -75,35 +85,85 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 	})
 }
 
-func NewEdge(target *url.URL) *Edge {
-	// SetURL do the following things
-	// rewriteRequestURL(r.Out, target)
-	// r.Out.Host = ""
+func NewEdge(cacheSize int, target *url.URL) *Edge {
+	edge := &Edge{
+		rp: &httputil.ReverseProxy{},
+	}
 
+	// rewriteは、レスポンスをオリジンサーバに転送する
 	rewrite := func(pr *httputil.ProxyRequest) {
+		// SetURLの中身
+		// rewriteRequestURL(r.Out, target)
+		// r.Out.Host = ""
 		pr.SetURL(target)
+
 		pr.Out.Host = pr.In.Host
 		pr.Out.Header["X-Forwarded-For"] = pr.In.Header["X-Forwarded-For"]
+		
+		// X-Forwarded-XXXX系のヘッダを書き込む
 		pr.SetXForwarded()
-		log.Printf("%s => %s\n", pr.In.RemoteAddr, target)
-		log.Printf("  pr.In.URL.Query() => %s\n", pr.In.URL.Query())
-		log.Printf("  pr.In.URL.Path => %s\n", pr.In.URL.Path)
-		log.Printf("  pr.In.Host => %s\n", pr.In.Host)
 	}
 
-	// hash := GenerateCacheKey(pr.In.Host, pr.In.URL.Path, pr.In.URL.Query())
+	// modifyResponseは、Responseを受け取った後に呼ばれるので、キャッシュの保存に利用する。
+	modifyResponse := func(resp *http.Response) error {
+		// net/http/httputil/reverseproxy.go:164-166
+		// ModifyResponse is an optional function that modifies the
+		// Response from the backend. It is called if the backend
+		// returns a response at all, with any HTTP status code.
+		// とあるので、エラーの可能性があるため、まずはそれを確認する。
+		if resp.StatusCode < 100 && resp.StatusCode > 199 {
+			return fmt.Errorf("bad status code error %q", resp.StatusCode)
+		}
 
-	return &Edge{
-		rp: &httputil.ReverseProxy{
-			Rewrite: rewrite,
-		},
+		req := resp.Request
+
+		// キャッシュを保存する
+		cacheKey := GenerateCacheKey(req.Host, req.URL.Path, req.URL.Query())
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("request.Body is closed before it is read: %v", err)
+		}
+	  // NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
+	  // 特に、中身をみたいわけではないし。
+		edge.cache.Put(cacheKey, string(body))
+		log.Printf("Add %s to cache\n", cacheKey)
+
+		// io.ReadAllがBodyを全て読むので、新しくBodyを作成する
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+
+		// Bodyを書き換える場合はContent-Lengthを更新する必要があるため必要。
+		// resp.ContentLength = int64(len(body))
+		// resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+
+		return nil
 	}
+
+	edge.rp.Rewrite = rewrite
+	edge.rp.ModifyResponse = modifyResponse
+	edge.cache = lrucache.New(cacheSize)
+
+
+	return edge
 }
 
-func (n *Edge) Start(addr string) {
+
+func main() {
+	edgeNumber, ok := os.LookupEnv("EDGE_NUMBER")
+	if !ok {
+		panic("Failed to get EDGE_NUMBER")
+	}
+	log.SetPrefix(fmt.Sprintf("[EDGE%s] ", edgeNumber))
+
+	target, err := url.Parse("http://" + ORIGIN_SERVER_HOSTNAME + ":9000")
+	if err != nil {
+		panic("Failed to parse the url of the origin server")
+	}
+
+	edge := NewEdge(8, target) // NOTE: 8 is too small for the cache size
 	server := http.Server{
-		Addr: addr,
-		Handler: checkCache(logger(n.rp), n),
+		Addr: EDGE_ADDRESS + EDGE_PORT,
+		Handler: logger(checkCache(edge.rp, edge)),
 	}
 
 	hostname, err := os.Hostname()
@@ -111,26 +171,7 @@ func (n *Edge) Start(addr string) {
 		panic(err)
 	}
 
-	log.Printf("Start Listening at %s:9000\n", hostname)
+	log.Printf("Start Listening at %s%s\n", hostname, EDGE_PORT)
 	log.Fatalln(server.ListenAndServe())
-}
-
-const ORIGIN_SERVER_HOSTNAME = "origin"
-
-func main() {
-	edgeNumber, ok := os.LookupEnv("EDGE_NUMBER")
-	if !ok {
-		panic("Failed to get EDGE_NUMBER")
-	}
-
-	log.SetPrefix(fmt.Sprintf("[EDGE%s] ", edgeNumber))
-
-	target, err := url.Parse("http://" + ORIGIN_SERVER_HOSTNAME + ":9000")
-	if err != nil {
-		panic("Failed to parse Origin server")
-	}
-
-	edge := NewEdge(target)
-	edge.Start("0.0.0.0:5000")
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"maps"
 	"net/url"
 	"net/http"
@@ -26,7 +27,7 @@ type Edge struct {
 // ホスト: 127.0.0.1
 // パス  : /index.html
 // クエリ: ?test=hoge
-func GenerateCacheKey(host string, path string, queries map[string]string) string {
+func GenerateCacheKey(host string, path string, queries url.Values) string {
 	// sha256関数が[]byteを受け取るので、[]byteにhost, path, queriesを変換する
 	byteArray := make([]byte, len(host) + len(path) + len(queries)) // 正確ではないけど、一旦確保
 
@@ -35,7 +36,11 @@ func GenerateCacheKey(host string, path string, queries map[string]string) strin
 	// の場合、
 	for _, k := range slices.Sorted(maps.Keys(queries)) {
 		byteArray = append(byteArray, []byte(k)...)
-		byteArray = append(byteArray, []byte(queries[k])...)
+		// カンマ区切りで記述されているクエリパラメータの場合も、ソートをすることによって順番の違いを無視する
+		// ex. /index.html?test=1,3,2 === ./index.html?test=1,2,3
+		values := queries[k][:]
+		slices.Sort(values)
+		byteArray = append(byteArray, []byte(strings.Join(values, ""))...)
 	}
 
 	byteArray = append(byteArray, []byte(path)...)
@@ -49,6 +54,23 @@ func GenerateCacheKey(host string, path string, queries map[string]string) strin
 func logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Println(r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkCacheはキャッシュがあるかどうかを確認します。また、存在した場合はキャッシュしていたボディ部分を返します。
+// 同時にログを書き込みます。
+func checkCache(next http.Handler, e *Edge) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// キャッシュキーを生成する
+		cacheKey := GenerateCacheKey(r.URL.Host, r.URL.Path, r.URL.Query())
+		// キャッシュキーが存在するかチェックする
+		if content, ok := e.cache.Get(cacheKey); ok {
+			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)
+			fmt.Fprint(w, content)
+			return
+		}
+		log.Printf("Cache MISS: %s is not in the cache\n", cacheKey)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -81,7 +103,7 @@ func NewEdge(target *url.URL) *Edge {
 func (n *Edge) Start(addr string) {
 	server := http.Server{
 		Addr: addr,
-		Handler: logger(n.rp),
+		Handler: checkCache(logger(n.rp), n),
 	}
 
 	hostname, err := os.Hostname()

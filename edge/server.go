@@ -20,13 +20,13 @@ type Edge struct {
 	 cache  lrucache.LRUCache	
 }
 
-// GenerateNewCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
+// GenerateCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
 // 作成する際、クエリパラメータの順番は無視する。
 // ホスト、パス、クエリの例: http://127.0.0.1:5001/index.html?test=hoge
 // ホスト: 127.0.0.1
 // パス  : /index.html
 // クエリ: ?test=hoge
-func GenerateNewCacheKey(host string, path string, queries map[string]string) string {
+func GenerateCacheKey(host string, path string, queries map[string]string) string {
 	// sha256関数が[]byteを受け取るので、[]byteにhost, path, queriesを変換する
 	byteArray := make([]byte, len(host) + len(path) + len(queries)) // 正確ではないけど、一旦確保
 
@@ -69,7 +69,7 @@ func NewEdge(target *url.URL) *Edge {
 		log.Printf("  pr.In.Host => %s\n", pr.In.Host)
 	}
 
-	// hash := GenerateNewCacheKey(pr.In.Host, pr.In.URL.Path, pr.In.URL.Query())
+	// hash := GenerateCacheKey(pr.In.Host, pr.In.URL.Path, pr.In.URL.Query())
 
 	return &Edge{
 		rp: &httputil.ReverseProxy{

@@ -1,19 +1,19 @@
 package main
 
 import (
-	"log"
 	"bytes"
-	"io"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"log"
+	"maps"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
-	"maps"
-	"net/url"
-	"net/http"
-	"net/http/httputil"
-	"encoding/hex"
-	"crypto/sha256"
 
 	"github.com/MayugeStudio/lrucache"
 )
@@ -25,8 +25,8 @@ const EDGE_ADDRESS = "0.0.0.0"
 const EDGE_PORT = ":5000"
 
 type Edge struct {
-	 rp			*httputil.ReverseProxy
-	 cache  *lrucache.LRUCache	
+	rp    *httputil.ReverseProxy
+	cache *lrucache.LRUCache
 }
 
 // GenerateCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
@@ -37,7 +37,7 @@ type Edge struct {
 // クエリ: ?test=hoge
 func GenerateCacheKey(host string, path string, queries url.Values) string {
 	// sha256関数が[]byteを受け取るので、[]byteにhost, path, queriesを変換する
-	byteArray := make([]byte, len(host) + len(path) + len(queries)) // 正確ではないけど、一旦確保
+	byteArray := make([]byte, len(host)+len(path)+len(queries)) // 正確ではないけど、一旦確保
 
 	// queriesの順番を無視するための処理。
 	// ?hoge=fuga&bar=baz
@@ -53,7 +53,6 @@ func GenerateCacheKey(host string, path string, queries url.Values) string {
 
 	byteArray = append(byteArray, []byte(path)...)
 	byteArray = append(byteArray, []byte(host)...)
-
 
 	hashValue := sha256.Sum256(byteArray)
 	return hex.EncodeToString(hashValue[:])
@@ -99,7 +98,7 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 
 		pr.Out.Host = pr.In.Host
 		pr.Out.Header["X-Forwarded-For"] = pr.In.Header["X-Forwarded-For"]
-		
+
 		// X-Forwarded-XXXX系のヘッダを書き込む
 		pr.SetXForwarded()
 	}
@@ -124,8 +123,8 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 		if err != nil {
 			return fmt.Errorf("request.Body is closed before it is read: %v", err)
 		}
-	  // NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
-	  // 特に、中身をみたいわけではないし。
+		// NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
+		// 特に、中身をみたいわけではないし。
 		edge.cache.Put(cacheKey, string(body))
 		log.Printf("Add %s to cache\n", cacheKey)
 
@@ -143,10 +142,8 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 	edge.rp.ModifyResponse = modifyResponse
 	edge.cache = lrucache.New(cacheSize)
 
-
 	return edge
 }
-
 
 func main() {
 	edgeNumber, ok := os.LookupEnv("EDGE_NUMBER")
@@ -162,7 +159,7 @@ func main() {
 
 	edge := NewEdge(8, target) // NOTE: 8 is too small for the cache size
 	server := http.Server{
-		Addr: EDGE_ADDRESS + EDGE_PORT,
+		Addr:    EDGE_ADDRESS + EDGE_PORT,
 		Handler: logger(checkCache(edge.rp, edge)),
 	}
 
@@ -174,4 +171,3 @@ func main() {
 	log.Printf("Start Listening at %s%s\n", hostname, EDGE_PORT)
 	log.Fatalln(server.ListenAndServe())
 }
-

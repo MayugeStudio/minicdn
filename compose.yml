@@ -7,22 +7,25 @@ services:
       cdn:
         ipv4_address: 192.168.0.10
 
-  node1:
-    hostname: node1
-    build: ./node
+  edge1:
+    hostname: edge1
+    build: 
+      context: ./edge
     environment:
-      NODE_NUMBER: 1
+      EDGE_NUMBER: 1
+
     ports:
       - "5001:5000"
     networks:
       cdn:
         ipv4_address: 192.168.0.51
 
-  node2:
-    hostname: node2
-    build: ./node
+  edge2:
+    hostname: edge2
+    build:
+      context: ./edge
     environment:
-      NODE_NUMBER: 2
+      EDGE_NUMBER: 2
     ports:
       - "5002:5000"
     networks:

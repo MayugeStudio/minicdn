@@ -6,13 +6,13 @@ import (
 )
 
 // func Test_Lookup() {
-// 	mh := getMaglevHash()
+// 	mh := getMaglev()
 // 	mh.Lookup()
 // }
 
 func TestPopulate_NoEmptySlot(t *testing.T) {
-	mh := getMaglevHash()
-	for _, b := range table.lookup {
+	m := getMaglev()
+	for _, b := range m.lookup {
 		if b == -1 {
 			t.Fatalf("slot %d is empty", b)
 		}
@@ -20,15 +20,15 @@ func TestPopulate_NoEmptySlot(t *testing.T) {
 }
 
 func TestPopulate_Deterministic(t *testing.T) {
-	mh1 := getMaglevHash()
-	mh2 := getMaglevHash()
+	mh1 := getMaglev()
+	mh2 := getMaglev()
 	if !reflect.DeepEqual(mh1, mh2) {
 		t.Fatalf("populate is not deterministic")
 	}
 }
 
 func TestRevive(t *testing.T) {
-	mh := getMaglevHash()
+	mh := getMaglev()
 	mh.Kill(0)
 	mh.Revive(0)
 	if len(mh.dead) != 0 {
@@ -37,7 +37,7 @@ func TestRevive(t *testing.T) {
 }
 
 func TestKill(t *testing.T) {
-	mh := getMaglevHash()
+	mh := getMaglev()
 	mh.Kill(0)
 	if len(mh.dead) != 1 {
 		t.Fatalf("backend 0 is not killed")
@@ -49,7 +49,7 @@ func TestKill(t *testing.T) {
 	}
 }
 
-func getMaglevHash() *MaglevHash {
+func getMaglev() *Maglev {
 	return New([]*Backend{
 		&Backend{
 			Name: "backend-1",

@@ -14,8 +14,9 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/MayugeStudio/lrucache"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 const ORIGIN_SERVER_HOSTNAME = "origin"
@@ -24,9 +25,12 @@ const ORIGIN_PORT = "9000"
 const EDGE_ADDRESS = "0.0.0.0"
 const EDGE_PORT = ":5000"
 
+// const TTL = time.Minute * 5
+const TTL = time.Second * 20
+
 type Edge struct {
 	rp    *httputil.ReverseProxy
-	cache *lrucache.LRUCache
+	cache *expirable.LRU[string, string]
 }
 
 // GenerateCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
@@ -84,7 +88,7 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 	})
 }
 
-func NewEdge(cacheSize int, target *url.URL) *Edge {
+func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 	edge := &Edge{
 		rp: &httputil.ReverseProxy{},
 	}
@@ -110,9 +114,9 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 		// Response from the backend. It is called if the backend
 		// returns a response at all, with any HTTP status code.
 		// とあるので、エラーの可能性があるため、まずはそれを確認する。
-		if resp.StatusCode < 100 || resp.StatusCode > 199 {
-			return fmt.Errorf("bad status code error %d", resp.StatusCode)
-		}
+		// if resp.StatusCode < 100 || resp.StatusCode > 199 {
+		// 	return fmt.Errorf("bad status code error %d", resp.StatusCode)
+		// }
 
 		req := resp.Request
 
@@ -125,7 +129,7 @@ func NewEdge(cacheSize int, target *url.URL) *Edge {
 		}
 		// NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
 		// 特に、中身をみたいわけではないし。
-		edge.cache.Put(cacheKey, string(body))
+		edge.cache.Add(cacheKey, string(body))
 		log.Printf("Add %s to cache\n", cacheKey)
 
 		// io.ReadAllがBodyを全て読むので、新しくBodyを作成する
@@ -157,7 +161,7 @@ func main() {
 		panic("Failed to parse the url of the origin server")
 	}
 
-	edge := NewEdge(8, target) // NOTE: 8 is too small for the cache size
+	edge := NewEdge(8, TTL, target) // NOTE: 8 is too small for the cache size
 	server := http.Server{
 		Addr:    EDGE_ADDRESS + EDGE_PORT,
 		Handler: logger(checkCache(edge.rp, edge)),
@@ -171,3 +175,4 @@ func main() {
 	log.Printf("Start Listening at %s%s\n", hostname, EDGE_PORT)
 	log.Fatalln(server.ListenAndServe())
 }
+

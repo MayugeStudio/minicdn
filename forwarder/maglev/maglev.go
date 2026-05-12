@@ -1,15 +1,14 @@
-package main
+package maglev
 
 import (
-	"net/url"
+	// "net/url"
 	"github.com/dchest/siphash"
 )
 
-type Backend struct {
-	// Name reprensents the name of the backend which is used to [Maglev]
-	Name string 
-	Addr url.URL
-}
+const (
+	SmallM = 65537
+)
+
 
 type Maglev struct {
 	n int
@@ -24,21 +23,21 @@ type Maglev struct {
 	// dead stores dead backend indeces
 	dead map[int]struct{}
 
-	// backends stores an array of backends
-	backends []*Backend
+	// names stores an array of names
+	names []string
 }
 
 
-func New(backends []*Backend, m uint64) *Maglev {
-	offsets, skips := generateOffsetsAndSkips(backends, m)
+func New(names []string, m uint64) *Maglev {
+	offsets, skips := generateOffsetsAndSkips(names, m)
 	maglev := &Maglev{
-		n: len(backends),
+		n: len(names),
 		m: m,
 		offsets: offsets,
-		initialOffsets: make([]uint64, len(backends)),
+		initialOffsets: make([]uint64, len(names)),
 		skips: skips,
 		dead: make(map[int]struct{}),
-		backends: backends,
+		names: names,
 	}
 
 	copy(maglev.initialOffsets, offsets)
@@ -47,10 +46,10 @@ func New(backends []*Backend, m uint64) *Maglev {
 	return maglev
 }
 
-func (p *Maglev) Lookup(key string) *Backend {
+func (p *Maglev) Lookup(key string) string {
 	h := siphash.Hash(0xdeadbeef, 0, []byte(key))
-	idx := h % uint64(len(p.backends))
-	return p.backends[p.lookup[idx]]
+	idx := h % uint64(len(p.names))
+	return p.names[p.lookup[idx]]
 }
 
 func (p *Maglev) Rebuild() {
@@ -76,7 +75,7 @@ func (p *Maglev) populate() []int {
 	var n uint64 = 0
 	for {
 		// for each backends
-		for i := 0; i < len(p.backends); i++ {
+		for i := 0; i < len(p.names); i++ {
 			if _, exists := p.dead[i]; exists {
 				continue
 			}
@@ -107,12 +106,12 @@ func (p *Maglev) nextCandidate(i int) uint64 {
 	return res
 } 
 
-func generateOffsetsAndSkips(backends []*Backend, m uint64) ([]uint64, []uint64) {
-	offsets := make([]uint64, len(backends))
-	skips := make([]uint64, len(backends))
+func generateOffsetsAndSkips(names []string, m uint64) ([]uint64, []uint64) {
+	offsets := make([]uint64, len(names))
+	skips := make([]uint64, len(names))
 
-	for i, backend := range backends {
-		b := []byte(backend.Name)
+	for i, name := range names {
+		b := []byte(name)
 		h := siphash.Hash(0xdeadbeef, 0, b)
 		// There is a small trick in here:
 		// use upper 32 bits for offsets and lower 32 bits for skips,

@@ -1,6 +1,12 @@
 services:
   origin:
-    build: ./origin
+    build: 
+      context: ./origin
+      args:
+        - HTTP_PROXY
+        - HTTPS_PROXY
+        - NO_PROXY
+
     ports:
       - "9000:9000"
     networks:
@@ -11,6 +17,11 @@ services:
     hostname: edge1
     build: 
       context: ./edge
+      args:
+        - HTTP_PROXY
+        - HTTPS_PROXY
+        - NO_PROXY
+
     environment:
       EDGE_NUMBER: 1
 
@@ -24,6 +35,11 @@ services:
     hostname: edge2
     build:
       context: ./edge
+      args:
+        - HTTP_PROXY
+        - HTTPS_PROXY
+        - NO_PROXY
+
     environment:
       EDGE_NUMBER: 2
     ports:

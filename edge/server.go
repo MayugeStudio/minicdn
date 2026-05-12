@@ -81,6 +81,7 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 		if content, ok := e.cache.Get(cacheKey); ok {
 			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)
 			io.WriteString(w, content)
+			// ヒットした場合は、TTLをリセットする。
 			return
 		}
 		log.Printf("Cache MISS: %s is not in the cache\n", cacheKey)
@@ -144,7 +145,10 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 
 	edge.rp.Rewrite = rewrite
 	edge.rp.ModifyResponse = modifyResponse
-	edge.cache = lrucache.New(cacheSize)
+	onEvict := func (key string, value string) {
+		log.Printf("%s has been evicted", key)
+	}
+	edge.cache = expirable.NewLRU[string, string](cacheSize, onEvict, ttl)
 
 	return edge
 }

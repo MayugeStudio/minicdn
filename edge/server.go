@@ -81,7 +81,6 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 		if content, ok := e.cache.Get(cacheKey); ok {
 			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)
 			io.WriteString(w, content)
-			// ヒットした場合は、TTLをリセットする。
 			return
 		}
 		log.Printf("Cache MISS: %s is not in the cache\n", cacheKey)

@@ -79,11 +79,11 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 
 		// キャッシュキーが存在するかチェックする
 		if content, ok := e.cache.Get(cacheKey); ok {
-			log.Printf("Cache HIT: %s is in the cache\n", cacheKey)
+			log.Printf("Cache HIT: %.8s is in the cache\n", cacheKey)
 			io.WriteString(w, content)
 			return
 		}
-		log.Printf("Cache MISS: %s is not in the cache\n", cacheKey)
+		log.Printf("Cache MISS: %.8s is not in the cache\n", cacheKey)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -130,7 +130,7 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 		// NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
 		// 特に、中身をみたいわけではないし。
 		edge.cache.Add(cacheKey, string(body))
-		log.Printf("Add %s to cache\n", cacheKey)
+		log.Printf("Add %.8s to cache\n", cacheKey)
 
 		// io.ReadAllがBodyを全て読むので、新しくBodyを作成する
 		resp.Body = io.NopCloser(bytes.NewReader(body))
@@ -145,7 +145,7 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 	edge.rp.Rewrite = rewrite
 	edge.rp.ModifyResponse = modifyResponse
 	onEvict := func (key string, value string) {
-		log.Printf("%s has been evicted", key)
+		log.Printf("%.8s has been evicted", key)
 	}
 	edge.cache = expirable.NewLRU[string, string](cacheSize, onEvict, ttl)
 

@@ -48,6 +48,21 @@ services:
       cdn:
         ipv4_address: 192.168.0.52
 
+  forwarder:
+    hostname: forwarder
+    build:
+      context: ./forwarder
+      args:
+        - HTTP_PROXY
+        - HTTPS_PROXY
+        - NO_PROXY
+
+    ports:
+      - "8000:8000"
+    networks:
+      cdn:
+        ipv4_address: 192.168.0.80
+
 networks:
   cdn:
     ipam:

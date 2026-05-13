@@ -1,4 +1,4 @@
-package maglev
+package maglev_test
 
 import (
 	"reflect"

@@ -25,12 +25,21 @@ const ORIGIN_PORT = "9000"
 const EDGE_ADDRESS = "0.0.0.0"
 const EDGE_PORT = ":5000"
 
+const HEALTH_CHECK_PORT = ":3232"
+
 // const TTL = time.Minute * 5
-const TTL = time.Second * 20
+const TTL = time.Minute * 60
 
 type Edge struct {
 	rp    *httputil.ReverseProxy
 	cache *expirable.LRU[string, string]
+}
+
+func (e *Edge) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received health check request from %s", r.RemoteAddr)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 }
 
 // GenerateCacheKeyはキャッシュのキーをホスト、パス、クエリから作成する。
@@ -153,12 +162,15 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 }
 
 func main() {
+	// ログの設定
 	edgeNumber, ok := os.LookupEnv("EDGE_NUMBER")
 	if !ok {
 		panic("Failed to get EDGE_NUMBER")
 	}
 	log.SetPrefix(fmt.Sprintf("[EDGE%s] ", edgeNumber))
 
+
+	// データ用ポート
 	target, err := url.Parse("http://" + ORIGIN_SERVER_HOSTNAME + ":9000")
 	if err != nil {
 		panic("Failed to parse the url of the origin server")
@@ -175,7 +187,19 @@ func main() {
 		panic(err)
 	}
 
-	log.Printf("Start Listening at %s%s\n", hostname, EDGE_PORT)
-	log.Fatalln(server.ListenAndServe())
+	log.Printf("Data server: Start listening at %s%s\n", hostname, EDGE_PORT)
+	go server.ListenAndServe()
+
+	// ヘルスチェック用ポート
+	healthCheckMux := http.NewServeMux()
+	healthCheckMux.HandleFunc("/health", edge.HandleHealthCheck)
+
+	healthCheckServer := &http.Server{
+		Addr: "0.0.0.0" + HEALTH_CHECK_PORT,
+		Handler: healthCheckMux,
+	}
+
+	log.Printf("Control server: Start listening at %s%s\n", hostname, HEALTH_CHECK_PORT)
+	healthCheckServer.ListenAndServe()
 }
 

@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"time"
 
 	"github.com/MayugeStudio/minicdn/forwarder/maglev"
 )
 
 const FORWARDER_PORT = ":8000"
+const HEALTH_CHECK_INTERVAL = time.Second * 30
 
 func reverseProxy(target *url.URL) *httputil.ReverseProxy {
 	rp := &httputil.ReverseProxy{
@@ -46,7 +48,7 @@ func New(backends []*Backend) *Forwarder {
 
 	proxies := make(map[string]*httputil.ReverseProxy)
 	for _, backend := range backends {
-		proxies[backend.Name] = reverseProxy(backend.Addr)
+		proxies[backend.Name] = reverseProxy(backend.DataAddr)
 	}
 
 	forwarder := &Forwarder{
@@ -66,19 +68,80 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.proxies[backend].ServeHTTP(w, r)
 }
 
+func (f *Forwarder) StartControlEndpointGoroutine(backends []*Backend) {
+	log.Printf("Control endpoint: Start health checking\n")
+	ticker := time.NewTicker(HEALTH_CHECK_INTERVAL)
+	for {
+		select {
+		case <-ticker.C:
+			// 全てのバックエンドにヘルスチェックHTTPパケットを送信する
+			for i, backend := range backends {
+				ok := doHealthCheck(backend.ControlAddr)
+
+				if ok && !backend.IsAlive { 
+					// 応答していなかったはずなのに、応答するということは復活している。
+					// 再び選ばれるようにする。
+					f.ml.Revive(i)
+
+					// 現在稼働中として記録しておく
+					backend.IsAlive = true
+
+					log.Printf("Health check: %s is currently running", backend.Name)
+					continue
+				}
+
+				if !ok && backend.IsAlive {
+					// ヘルスチェックに応答しなかった場合
+					// このバックエンドがMaglev Hashingで選ばれないようにする。
+					f.ml.Kill(i)
+
+					// 現在ダウン中として記録しておく
+					backend.IsAlive = false
+
+					log.Printf("Health check: %s is currently not running\n", backend.Name)
+				}
+			}
+		}
+	}
+}
+
+func doHealthCheck(url *url.URL) bool {
+	log.Printf("Health check: Send packet to %s\n", url.String())
+	resp, err := http.Get(url.String())
+	if err != nil {
+		return false
+	}
+
+	defer resp.Body.Close()
+	return true
+}
+
 
 func main() {
 	backends := []*Backend{
 		&Backend{
 			Name: "cachenode01",
-			Addr: parseURL("http://edge1:5000"),
+			DataAddr: parseURL("http://edge1:5000"),
+			ControlAddr: parseURL("http://edge1:3232"),
+			IsAlive: true,
 		},
 		&Backend{
 			Name: "cachenode02",
-			Addr: parseURL("http://edge2:5000"),
+			DataAddr: parseURL("http://edge2:5000"),
+			ControlAddr: parseURL("http://edge2:3232"),
+			IsAlive: true,
 		},
 	}
+
+
 	f := New(backends)
+
+
+	// ヘルスチェック用Goroutineの立ち上げ
+	go f.StartControlEndpointGoroutine(backends)
+
+
+	// データ転送用ポート
 	server := http.Server{
 		Addr: "0.0.0.0:8000",
 		Handler: f,
@@ -89,7 +152,7 @@ func main() {
 		panic(err)
 	}
 
-	log.Printf("Start Listening at %s%s\n", hostname, FORWARDER_PORT)
+	log.Printf("Data endpoint: Start listening at %s%s\n", hostname, FORWARDER_PORT)
 	log.Fatalln(server.ListenAndServe())
 }
 

@@ -28,7 +28,7 @@ const EDGE_PORT = ":5000"
 const HEALTH_CHECK_PORT = ":3232"
 
 // const TTL = time.Minute * 5
-const TTL = time.Second * 20
+const TTL = time.Minute * 60
 
 type Edge struct {
 	rp    *httputil.ReverseProxy
@@ -187,7 +187,7 @@ func main() {
 		panic(err)
 	}
 
-	log.Printf("Data server: Start Listening at %s%s\n", hostname, EDGE_PORT)
+	log.Printf("Data server: Start listening at %s%s\n", hostname, EDGE_PORT)
 	go server.ListenAndServe()
 
 	// ヘルスチェック用ポート
@@ -199,7 +199,7 @@ func main() {
 		Handler: healthCheckMux,
 	}
 
-	log.Printf("Control server: Start Listening at %s%s\n", hostname, HEALTH_CHECK_PORT)
+	log.Printf("Control server: Start listening at %s%s\n", hostname, HEALTH_CHECK_PORT)
 	healthCheckServer.ListenAndServe()
 }
 

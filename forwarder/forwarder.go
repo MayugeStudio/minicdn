@@ -69,7 +69,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Forwarder) StartControlEndpointGoroutine(backends []*Backend) {
-	log.Printf("Control endpoint: Start Health checking\n")
+	log.Printf("Control endpoint: Start health checking\n")
 	ticker := time.NewTicker(HEALTH_CHECK_INTERVAL)
 	for {
 		select {
@@ -152,7 +152,7 @@ func main() {
 		panic(err)
 	}
 
-	log.Printf("Data endpoint: Start Listening at %s%s\n", hostname, FORWARDER_PORT)
+	log.Printf("Data endpoint: Start listening at %s%s\n", hostname, FORWARDER_PORT)
 	log.Fatalln(server.ListenAndServe())
 }
 

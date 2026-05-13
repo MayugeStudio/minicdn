@@ -12,6 +12,7 @@ import (
 )
 
 const FORWARDER_PORT = ":8000"
+const HEALTH_CHECK_INTERVAL = time.Second * 30
 
 func reverseProxy(target *url.URL) *httputil.ReverseProxy {
 	rp := &httputil.ReverseProxy{
@@ -69,7 +70,7 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (f *Forwarder) StartControlEndpointGoroutine(backends []*Backend) {
 	log.Printf("Control endpoint: Start Health checking\n")
-	ticker := time.NewTicker(time.Second * 10)
+	ticker := time.NewTicker(HEALTH_CHECK_INTERVAL)
 	for {
 		select {
 		case <-ticker.C:

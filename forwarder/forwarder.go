@@ -61,6 +61,7 @@ func New(backends []*Backend) *Forwarder {
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Path
 	backend := f.ml.Lookup(key)
+	log.Printf("Request from %s to %s is directed at %s\n", r.RemoteAddr, r.Host + r.URL.Path, backend)
 
 	f.proxies[backend].ServeHTTP(w, r)
 }

@@ -5,9 +5,12 @@ import (
 	"net/url"
 	"net/http"
 	"net/http/httputil"
+	"os"
 
 	"github.com/MayugeStudio/minicdn/forwarder/maglev"
 )
+
+const FORWARDER_PORT = ":8000"
 
 func reverseProxy(target *url.URL) *httputil.ReverseProxy {
 	rp := &httputil.ReverseProxy{
@@ -43,7 +46,7 @@ func New(backends []*Backend) *Forwarder {
 
 	proxies := make(map[string]*httputil.ReverseProxy)
 	for _, backend := range backends {
-		proxies[backend.Name] = reverseProxy(backend.Address)
+		proxies[backend.Name] = reverseProxy(backend.Addr)
 	}
 
 	forwarder := &Forwarder{
@@ -62,5 +65,30 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.proxies[backend].ServeHTTP(w, r)
 }
 
+
 func main() {
+	backends := []*Backend{
+		&Backend{
+			Name: "cachenode01",
+			Addr: parseURL("http://edge1:5000"),
+		},
+		&Backend{
+			Name: "cachenode02",
+			Addr: parseURL("http://edge2:5000"),
+		},
+	}
+	f := New(backends)
+	server := http.Server{
+		Addr: "0.0.0.0:8000",
+		Handler: f,
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		panic(err)
+	}
+
+	log.Printf("Start Listening at %s%s\n", hostname, FORWARDER_PORT)
+	log.Fatalln(server.ListenAndServe())
 }
+

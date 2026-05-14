@@ -136,10 +136,6 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 		// io.ReadAllがBodyを全て読むので、新しくBodyを作成する
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 
-		// Bodyを書き換える場合はContent-Lengthを更新する必要があるため必要。
-		// resp.ContentLength = int64(len(body))
-		// resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
-
 		return nil
 	}
 

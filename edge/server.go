@@ -14,6 +14,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"strconv"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -71,6 +72,83 @@ func GenerateCacheKey(host string, path string, queries url.Values) string {
 	return hex.EncodeToString(hashValue[:])
 }
 
+type CacheControl struct {
+	Key   string
+	Value int
+}
+
+// ParseCacheControlsはキャッシュコントロールヘッダを文字列で受け取り、
+// パースして構造体に詰めた結果を返す関数。
+func ParseCacheControls(rawCacheControl string) ([]CacheControl, error) {
+	var res []CacheControl
+	parts := strings.Split(rawCacheControl, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		// key=valueの形の時(max-age=10など)
+		if strings.Contains(part, "=") {
+			leftAndRight := strings.Split(part, "=")
+			if len(leftAndRight) != 2 {
+				return nil, fmt.Errorf("could not split %v into two values: got %v", part, leftAndRight)
+			}
+			left, right := leftAndRight[0], leftAndRight[1]
+
+			converted, err := strconv.Atoi(right)
+			if err != nil {
+				return nil, fmt.Errorf("could not convert %v to string\n", right)
+			}
+
+			res = append(res, CacheControl{
+				Key: left,
+				Value: converted,
+			})
+		// keyのみの場合(privateなど)
+		} else {
+			res = append(res, CacheControl{
+				Key: part,
+				Value: -1,
+			})
+		}
+	}
+	return res, nil
+}
+
+type CacheConfig struct {
+	MaxAge	time.Duration
+	Public	bool
+	Private	bool
+	NoCache bool
+	NoStore	bool
+}
+
+// ConstructCacheConfigは、CacheControlの配列からCacheConfigを作成して返します。
+// ここでは、[]CacheControlを使いやすいCacheConfigに詰めるだけなので、他に何もしません。
+func ConstructCacheConfig(cacheControls []CacheControl) CacheConfig {
+	var config CacheConfig
+	for _, cacheControl := range cacheControls {
+		switch cacheControl.Key {
+		case "max-age", "s-maxage": {
+			config.MaxAge = time.Second * time.Duration(cacheControl.Value)
+		}
+		case "public": {
+			config.Public = true
+		}
+		case "private": {
+			config.Private = true
+		}
+		case "no-cache": {
+			// Stale状態を表現するために、MaxAgeは0にする
+			config.NoCache = true
+		}
+		case "no-store": {
+			config.NoStore = true
+		}
+		}
+	}
+
+	return config
+}
+
+
 // logger
 func logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,13 +190,36 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 		pr.Out.Host = pr.In.Host
 		pr.Out.Header["X-Forwarded-For"] = pr.In.Header["X-Forwarded-For"]
 
+
 		// X-Forwarded-XXXX系のヘッダを書き込む
 		pr.SetXForwarded()
 	}
 
 	// modifyResponseは、Responseを受け取った後に呼ばれるので、キャッシュの保存に利用する。
 	modifyResponse := func(resp *http.Response) error {
+		// Cache-Controlヘッダを解析し、CacheConfigを作成
+		var cacheConfig CacheConfig
+		cacheControlHeader := resp.Header.Get("Cache-Control")
+		if strings.TrimSpace(cacheControlHeader) != "" {
+			log.Printf("Cache-Control(%s) exists\n", cacheControlHeader)
+			cacheControls, err := ParseCacheControls(cacheControlHeader)
 
+			if err != nil {
+				log.Printf("ERROR: could not resolve cache-control headers: got %v\n", err)
+			}
+
+			// キャッシュコンフィグを解析した[]CacheControlから作成する
+			cacheConfig = ConstructCacheConfig(cacheControls)
+
+		} else {
+			log.Println("Cache-Control does not exist in this request")
+		}
+
+
+		// 実際にキャッシュを保存する
+		if cacheConfig.Private || cacheConfig.NoStore {
+			return nil
+		}
 		req := resp.Request
 
 		// キャッシュを保存する

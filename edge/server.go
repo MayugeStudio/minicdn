@@ -118,14 +118,6 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 
 	// modifyResponseは、Responseを受け取った後に呼ばれるので、キャッシュの保存に利用する。
 	modifyResponse := func(resp *http.Response) error {
-		// net/http/httputil/reverseproxy.go:164-166
-		// ModifyResponse is an optional function that modifies the
-		// Response from the backend. It is called if the backend
-		// returns a response at all, with any HTTP status code.
-		// とあるので、エラーの可能性があるため、まずはそれを確認する。
-		// if resp.StatusCode < 100 || resp.StatusCode > 199 {
-		// 	return fmt.Errorf("bad status code error %d", resp.StatusCode)
-		// }
 
 		req := resp.Request
 

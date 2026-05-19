@@ -28,6 +28,31 @@ const EDGE_PORT = ":5000"
 
 const HEALTH_CHECK_PORT = ":3232"
 
+const DEFAULT_MAXAGE = time.Second * 30
+
+type CacheEntry struct {
+	Body		 string
+	ETag		 string
+	StoredAt time.Time
+	MaxAge   time.Duration
+}
+
+func NewCacheEntry(body string, etag string, maxAge time.Duration) *CacheEntry {
+	return &CacheEntry {
+		Body: 		body,
+		ETag:			etag,
+		StoredAt: time.Now(),
+		MaxAge:   maxAge,
+	}
+}
+
+func (c *CacheEntry) IsFresh() bool {
+	return time.Now().Sub(c.StoredAt) <= c.MaxAge 
+}
+
+func (c *CacheEntry) HasETag() bool {
+	return c.ETag != ""
+}
 
 type Edge struct {
 	rp    *httputil.ReverseProxy
@@ -114,14 +139,15 @@ type CacheConfig struct {
 	MaxAge	time.Duration
 	Public	bool
 	Private	bool
-	NoCache bool
+	// NoCache bool
 	NoStore	bool
 }
 
 // ConstructCacheConfigは、CacheControlの配列からCacheConfigを作成して返します。
-// ここでは、[]CacheControlを使いやすいCacheConfigに詰めるだけなので、他に何もしません。
+// MaxAgeはデフォルトでDEFAULT_MAXAGEの値を使う
 func ConstructCacheConfig(cacheControls []CacheControl) CacheConfig {
 	var config CacheConfig
+	config.MaxAge = -1
 	for _, cacheControl := range cacheControls {
 		switch cacheControl.Key {
 		case "max-age", "s-maxage": {
@@ -134,13 +160,16 @@ func ConstructCacheConfig(cacheControls []CacheControl) CacheConfig {
 			config.Private = true
 		}
 		case "no-cache": {
-			// Stale状態を表現するために、MaxAgeは0にする
-			config.NoCache = true
+			config.MaxAge = 0
 		}
 		case "no-store": {
 			config.NoStore = true
 		}
 		}
+	}
+	
+	if config.MaxAge == -1 {
+		config.MaxAge = DEFAULT_MAXAGE
 	}
 
 	return config
@@ -163,17 +192,36 @@ func checkCache(next http.Handler, e *Edge) http.Handler {
 		cacheKey := GenerateCacheKey(r.Host, r.URL.Path, r.URL.Query())
 
 		// キャッシュキーが存在するかチェックする
-		if content, ok := e.cache.Get(cacheKey); ok {
-			log.Printf("Cache HIT: %.8s is in the cache\n", cacheKey)
-			io.WriteString(w, content)
-			return
+		if cacheEntry, ok := e.cache.Get(cacheKey); ok {
+			if cacheEntry.IsFresh() {
+				log.Printf("Cache HIT(fresh): %.8s is in the cache\n", cacheKey)
+			} else {
+				log.Printf("Cache HIT(stale): %.8s is in the cache\n", cacheKey)
+			}
+
+			if cacheEntry.IsFresh() {
+				// Freshの場合、リクエストに書き込む
+				io.WriteString(w, cacheEntry.Body)
+				return
+			}
+
+			// Staleの場合、ETagがあれば検証
+			if cacheEntry.HasETag() {
+				// headerにIf-None-Matchを追加して送信。
+				r.Header.Set("If-None-Match", cacheEntry.ETag)
+			} else {
+				// 他の場合は、普通にリクエストを投げて更新する
+				log.Printf("%.8s does not have neither ETag nor Last-Modified\n", cacheKey)
+			}
+
+		} else {
+			log.Printf("Cache MISS: %.8s is not in the cache\n", cacheKey)
 		}
-		log.Printf("Cache MISS: %.8s is not in the cache\n", cacheKey)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
+func NewEdge(cacheSize int, target *url.URL) (*Edge, error) {
 	edge := &Edge{
 		rp: &httputil.ReverseProxy{},
 	}
@@ -195,6 +243,8 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 
 	// modifyResponseは、Responseを受け取った後に呼ばれるので、キャッシュの保存に利用する。
 	modifyResponse := func(resp *http.Response) error {
+		req := resp.Request
+
 		// Cache-Controlヘッダを解析し、CacheConfigを作成
 		var cacheConfig CacheConfig
 		cacheControlHeader := resp.Header.Get("Cache-Control")
@@ -212,27 +262,50 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 		} else {
 			log.Println("Cache-Control does not exist in this request")
 		}
+		etag := resp.Header.Get("ETag")
 
 		// キャッシュに保存する
 		if cacheConfig.Private || cacheConfig.NoStore {
 			return nil
 		}
-		req := resp.Request
 
-		// キャッシュを保存する
+		// cacheKeyを生成
 		cacheKey := GenerateCacheKey(req.Host, req.URL.Path, req.URL.Query())
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("request.Body is closed before it is read: %v", err)
 		}
-		// NOTE: もしかしたら、[]byte型がキャッシュの型として一番いいかもしれない。
-		// 特に、中身をみたいわけではないし。
-		edge.cache.Add(cacheKey, string(body))
-		log.Printf("Add %.8s to cache\n", cacheKey)
-
 		// io.ReadAllがBodyを全て読むので、新しくBodyを作成する
 		resp.Body = io.NopCloser(bytes.NewReader(body))
+
+		// もし、If-None-MatchをcheckCache()でヘッダに設定していた場合
+		if req.Header.Get("If-None-Match") != "" {
+			cacheEntry, ok := edge.cache.Get(cacheKey)
+			if !ok {
+				panic("unknown error")
+			}
+			// 変更されていなかった場合
+			if resp.StatusCode == http.StatusNotModified {
+				log.Printf("%.8s is not modified\n", cacheKey)
+				// storedAtを延命することによって、Freshにする
+				cacheEntry.StoredAt = time.Now()
+				log.Printf("	updated StoredAt\n")
+
+			// 変更されていた場合
+			} else if resp.StatusCode == http.StatusOK {
+				log.Printf("%.8s is modified\n", cacheKey)
+				cacheEntry.Body = string(body)
+				cacheEntry.ETag = etag
+				log.Printf("	updated Body and ETag\n")
+			}
+
+			return nil
+		}
+
+		cacheEntry := NewCacheEntry(string(body), etag, cacheConfig.MaxAge)
+		edge.cache.Add(cacheKey, cacheEntry)
+		log.Printf("Add %.8s to cache\n", cacheKey)
 
 		return nil
 	}

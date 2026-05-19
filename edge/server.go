@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
+	"github.com/hashicorp/golang-lru/v2"
 )
 
 const ORIGIN_SERVER_HOSTNAME = "origin"
@@ -28,12 +28,10 @@ const EDGE_PORT = ":5000"
 
 const HEALTH_CHECK_PORT = ":3232"
 
-// const TTL = time.Minute * 5
-const TTL = time.Minute * 60
 
 type Edge struct {
 	rp    *httputil.ReverseProxy
-	cache *expirable.LRU[string, string]
+	cache *lru.Cache[string, *CacheEntry]
 }
 
 func (e *Edge) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -215,8 +213,7 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 			log.Println("Cache-Control does not exist in this request")
 		}
 
-
-		// 実際にキャッシュを保存する
+		// キャッシュに保存する
 		if cacheConfig.Private || cacheConfig.NoStore {
 			return nil
 		}
@@ -242,12 +239,13 @@ func NewEdge(cacheSize int, ttl time.Duration, target *url.URL) *Edge {
 
 	edge.rp.Rewrite = rewrite
 	edge.rp.ModifyResponse = modifyResponse
-	onEvict := func (key string, value string) {
-		log.Printf("%.8s has been evicted", key)
+	cache, err := lru.New[string, *CacheEntry](cacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create lru.Cache: %v", err)
 	}
-	edge.cache = expirable.NewLRU[string, string](cacheSize, onEvict, ttl)
+	edge.cache = cache
 
-	return edge
+	return edge, nil
 }
 
 func main() {
@@ -265,7 +263,10 @@ func main() {
 		panic("Failed to parse the url of the origin server")
 	}
 
-	edge := NewEdge(8, TTL, target) // NOTE: 8 is too small for the cache size
+	edge, err := NewEdge(8, target) // NOTE: 8 is too small for the cache size
+	if err != nil {
+		log.Fatalf("failed to instantiate edge server : %v\n", err)
+	}
 	server := http.Server{
 		Addr:    EDGE_ADDRESS + EDGE_PORT,
 		Handler: logger(checkCache(edge.rp, edge)),
